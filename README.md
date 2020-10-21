@@ -38,7 +38,7 @@ env GOOS=linux GOARCH=amd64 go build main.go
 ```
 
 ### Creating a Service for Systemd
-1) On Ubuntu VPS the following was sufficient to create a service after the go app was placed in home folder: /home/vagrant/mysql-backup
+1) On Ubuntu VPS the following was sufficient to create a service after the go app was placed in home folder: /var/lib/postgresql/scripts/postgresql-backup
     ```
     touch /lib/systemd/system/postgresqlbackup.service
     ```
