@@ -263,7 +263,20 @@ func makeBackup() {
 	cleaner()
 }
 
+func initFoldersForBackups()  {
+	_, err := os.Stat(os.Getenv("BACKUP_DIR"))
+
+	if os.IsNotExist(err) {
+		errDir := os.MkdirAll(os.Getenv("BACKUP_DIR"), 0755)
+		if errDir != nil {
+			raven.CaptureErrorAndWait(err, nil)
+			log.Fatal(err)
+		}
+	}
+}
+
 func tasks() {
+	initFoldersForBackups()
 	makeBackup()
 }
 
