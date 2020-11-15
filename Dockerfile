@@ -7,7 +7,7 @@ RUN go mod download
 COPY . .
 RUN go build -o postgresql-backup
 
-FROM ubuntu:16.04 as dev-build
+FROM ubuntu:16.04 AS dev-build
 ENV TZ="Asia/Almaty"
 
 # Add the PostgreSQL PGP key to verify their Debian packages.
@@ -35,7 +35,7 @@ USER postgres
 #       allows the RUN command to span multiple lines.
 RUN /etc/init.d/postgresql start &&\
     psql --command "CREATE USER docker WITH SUPERUSER PASSWORD 'docker';" &&\
-    createdb -O docker test
+    createdb -O docker docker
 
 #RUN /etc/init.d/postgresql start &&\
 #    psql -U docker --command "CREATE TABLE accounts (username VARCHAR ( 50 ) UNIQUE NOT NULL);"
@@ -59,11 +59,14 @@ VOLUME  ["/etc/postgresql", "/var/log/postgresql", "/var/lib/postgresql"]
 # BACKUP script rotate.
 WORKDIR /var/lib/postgresql/scripts
 COPY --from=build-env /app/postgresql-backup .
+COPY .env.example .env
 USER root
+RUN pwd
+RUN ls -lah
 RUN chmod +x postgresql-backup
 
 # Copy cron file to the cron.d directory
-COPY cron /etc/cron.d/cron
+COPY docker/cron /etc/cron.d/cron
 
 # Give execution rights on the cron job
 RUN chmod 0644 /etc/cron.d/cron
@@ -72,7 +75,7 @@ RUN chmod 0644 /etc/cron.d/cron
 RUN crontab /etc/cron.d/cron
 
 # Add files
-ADD entrypoint.sh /entrypoint.sh
+ADD docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 USER postgres
