@@ -2,3 +2,4 @@
 .idea
 .postgresql-backup
 .DS_Store
+vendor
