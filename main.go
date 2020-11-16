@@ -7,6 +7,7 @@ import (
 	"github.com/getsentry/raven-go"
 	"github.com/h2non/filetype"
 	"github.com/ivahaev/russian-time"
+	"github.com/jasonlvhit/gocron"
 	"github.com/joho/godotenv"
 	"html/template"
 	"io/ioutil"
@@ -153,11 +154,48 @@ func fileNameGenerate() string {
 
 }
 
+func generatePostgresqlDumpOptions(fileName string) string {
+	var options string
+
+	if os.Getenv("POSTGRESQL_USER") != "" {
+		options += "-U" + os.Getenv("POSTGRESQL_USER")
+	} else {
+		options += "-U postgres"
+	}
+
+	if os.Getenv("POSTGRESQL_HOST") != "" {
+		options += " -h " + os.Getenv("POSTGRESQL_HOST")
+	}
+
+	if os.Getenv("POSTGRESQL_PORT") != "" {
+		options += " -p " + os.Getenv("POSTGRESQL_PORT")
+	} else {
+		options += " -p 5432"
+	}
+
+	if os.Getenv("POSTGRESQL_DB") != "" {
+		options += " " + os.Getenv("POSTGRESQL_DB")
+	} else {
+		options += " postgres"
+	}
+
+	if os.Getenv("BACKUP_DIR") != "" {
+		options += " | " + "gzip > " + os.Getenv("BACKUP_DIR") + fileName
+	} else {
+		options += " | " + "gzip > /var/lib/postgresql/backups/" + fileName
+	}
+
+	return options
+}
+
 func postgresqlDump() {
 	fileName := fileNameGenerate()
+	options := generatePostgresqlDumpOptions(fileName)
+
+	// pg_dump -U postgres -h 127.0.0.1 -p 5432 docker | gzip > /var/lib/postgresql/backups/filename.sql.gz
 	cmd := exec.Command("/bin/sh",
 		"-c",
-		"pg_dump "+"-U"+os.Getenv("POSTGRESQL_USER")+" -h "+os.Getenv("POSTGRESQL_HOST")+" -p "+os.Getenv("POSTGRESQL_PORT")+" "+os.Getenv("POSTGRESQL_DB") + " | "+"gzip > "+os.Getenv("BACKUP_DIR")+fileName)
+		"pg_dump "+options)
 
 	_, err := cmd.StdoutPipe()
 	if err != nil {
@@ -202,7 +240,7 @@ func isOlder(t time.Time) bool {
 		raven.CaptureErrorAndWait(err, nil)
 		log.Fatal(err)
 	}
-	var rotateTimeInHours = time.Duration(rotateParsedFromEnv)*time.Hour
+	var rotateTimeInHours = time.Duration(rotateParsedFromEnv) * time.Hour
 	return time.Now().Sub(t) > rotateTimeInHours
 }
 
@@ -263,7 +301,7 @@ func makeBackup() {
 	cleaner()
 }
 
-func initFoldersForBackups()  {
+func initFoldersForBackups() {
 	_, err := os.Stat(os.Getenv("BACKUP_DIR"))
 
 	if os.IsNotExist(err) {
@@ -277,7 +315,17 @@ func initFoldersForBackups()  {
 
 func tasks() {
 	initFoldersForBackups()
-	makeBackup()
+
+	gocron.Every(1).Hour().From(gocron.NextTick()).Do(makeBackup)
+
+	gocron.Every(1).Day().At("2:00").Do(makeBackup)
+
+	// remove, clear and next_run
+	_, time := gocron.NextRun()
+	fmt.Println(time)
+
+	// function Start start all the pending jobs
+	<-gocron.Start()
 }
 
 func main() {

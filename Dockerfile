@@ -21,7 +21,7 @@ RUN echo "deb http://apt.postgresql.org/pub/repos/apt/ precise-pgdg main" > /etc
 # Install ``python-software-properties``, ``software-properties-common`` and PostgreSQL 9.3
 #  There are some warnings (in red) that show up during the build. You can hide
 #  them by prefixing each apt-get statement with DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y python-software-properties software-properties-common postgresql-9.3 postgresql-client-9.3 postgresql-contrib-9.3 cron
+RUN apt-get update && apt-get install -y python-software-properties software-properties-common postgresql-9.3 postgresql-client-9.3 postgresql-contrib-9.3 nano
 
 # Note: The official Debian and Ubuntu images automatically ``apt-get clean``
 # after each ``apt-get``
@@ -61,18 +61,7 @@ WORKDIR /var/lib/postgresql/scripts
 COPY --from=build-env /app/postgresql-backup .
 COPY .env.example .env
 USER root
-RUN pwd
-RUN ls -lah
 RUN chmod +x postgresql-backup
-
-# Copy cron file to the cron.d directory
-COPY docker/cron /etc/cron.d/cron
-
-# Give execution rights on the cron job
-RUN chmod 0644 /etc/cron.d/cron
-
-# Apply cron job
-RUN crontab /etc/cron.d/cron
 
 # Add files
 ADD docker/entrypoint.sh /entrypoint.sh
