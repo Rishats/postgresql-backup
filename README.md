@@ -68,7 +68,7 @@ env GOOS=linux GOARCH=amd64 go build main.go
     ```
 
     ```
-    0 2 * * * /var/lib/postgresql/scripts/postgresql-backups > /dev/null 2>&1
+    0 2 * * * /var/lib/postgresql/scripts/postgresql-backup > /dev/null 2>&1
     ```
 
 ## Versioning
