@@ -6,37 +6,17 @@ import (
 	"fmt"
 	"github.com/getsentry/raven-go"
 	"github.com/h2non/filetype"
-	"github.com/ivahaev/russian-time"
-	"github.com/jasonlvhit/gocron"
 	"github.com/joho/godotenv"
-	"html/template"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 )
-
-func getTemplate(fileName string, funcmap template.FuncMap, data interface{}) (result string, err error) {
-	template, err := template.New(fileName).Funcs(funcmap).ParseFiles("templates/" + fileName)
-	if err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
-	}
-
-	var tpl bytes.Buffer
-	if err := template.Execute(&tpl, data); err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
-		panic(err)
-	}
-
-	result = tpl.String()
-
-	return
-}
 
 func sendToHorn(text string) {
 	m := map[string]interface{}{
@@ -58,93 +38,6 @@ func sendToHorn(text string) {
 	}
 
 	fmt.Println(resp)
-}
-
-func hourWithMin() string {
-
-	timeStamp := time.Unix(time.Now().Unix(), 0)
-
-	hr, min, _ := timeStamp.Clock()
-
-	finalTime := "%d:%d"
-
-	result := fmt.Sprintf(finalTime, hr, min)
-
-	return result
-}
-
-func weekDay() rtime.Weekday {
-	t := rtime.Now()
-	standardTime := time.Now()
-	t = rtime.Time(standardTime)
-
-	return t.Weekday()
-}
-
-func dumpError() {
-	type Info struct {
-		Status string
-	}
-
-	templateData := Info{
-		Status: "Dump error!",
-	}
-
-	funcmap := template.FuncMap{
-		"weekDay":     weekDay,
-		"hourWithMin": hourWithMin,
-	}
-
-	text, err := getTemplate("unsuccessful_backup.gohtml", funcmap, templateData)
-	if err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
-	}
-	sendToHorn(text)
-}
-
-func dumpSuccess() {
-	type Info struct {
-		Status string
-	}
-
-	templateData := Info{
-		Status: "Dump successful!",
-	}
-
-	funcmap := template.FuncMap{
-		"weekDay":     weekDay,
-		"hourWithMin": hourWithMin,
-	}
-
-	text, err := getTemplate("successful_backup.gohtml", funcmap, templateData)
-	if err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
-	}
-	sendToHorn(text)
-}
-
-func cleanerSuccess(fileName string) {
-	type Info struct {
-		FileName string
-	}
-
-	templateData := Info{
-		FileName: fileName,
-	}
-
-	funcmap := template.FuncMap{
-		"weekDay":     weekDay,
-		"hourWithMin": hourWithMin,
-	}
-
-	text, err := getTemplate("successful_cleaner.gohtml", funcmap, templateData)
-	if err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
-	}
-	sendToHorn(text)
 }
 
 func fileNameGenerate() string {
@@ -180,12 +73,37 @@ func generatePostgresqlDumpOptions(fileName string) string {
 	}
 
 	if os.Getenv("BACKUP_DIR") != "" {
-		options += " | " + "gzip > " + os.Getenv("BACKUP_DIR") + fileName
+		options += " | " + "gzip > " + os.Getenv("BACKUP_DIR") + "daily/" + fileName
 	} else {
-		options += " | " + "gzip > /var/lib/postgresql/backups/" + fileName
+		options += " | " + "gzip > /var/lib/postgresql/backups/daily/" + fileName
 	}
 
 	return options
+}
+
+func copyFile(src, dst string) (int64, error) {
+	sourceFileStat, err := os.Stat(src)
+	if err != nil {
+		return 0, err
+	}
+
+	if !sourceFileStat.Mode().IsRegular() {
+		return 0, fmt.Errorf("%s is not a regular file", src)
+	}
+
+	source, err := os.Open(src)
+	if err != nil {
+		return 0, err
+	}
+	defer source.Close()
+
+	destination, err := os.Create(dst)
+	if err != nil {
+		return 0, err
+	}
+	defer destination.Close()
+	nBytes, err := io.Copy(destination, source)
+	return nBytes, err
 }
 
 func postgresqlDump() {
@@ -200,51 +118,78 @@ func postgresqlDump() {
 	_, err := cmd.StdoutPipe()
 	if err != nil {
 		raven.CaptureErrorAndWait(err, nil)
-		dumpError()
+		sendToHorn("[PostgreSQL 📦] Возникли проблемы с бэкапом базы! ❌\nПодробнее можно узнать в Sentry! 🐞")
 		log.Fatal(err)
 	}
 
 	var waitStatus syscall.WaitStatus
 	if err := cmd.Run(); err != nil {
-		if err != nil {
-			raven.CaptureErrorAndWait(err, nil)
-			dumpError()
-			log.Fatal(err)
-		}
 		if exitError, ok := err.(*exec.ExitError); ok {
 			waitStatus = exitError.Sys().(syscall.WaitStatus)
 			fmt.Printf("Output: %s\n", []byte(fmt.Sprintf("%d", waitStatus.ExitStatus())))
 		}
+
+		raven.CaptureErrorAndWait(err, nil)
+		sendToHorn("[PostgreSQL 📦] Возникли проблемы с бэкапом базы! ❌\nПодробнее можно узнать в Sentry! 🐞")
+		log.Fatal(err)
 	} else {
 		// Success
 		waitStatus = cmd.ProcessState.Sys().(syscall.WaitStatus)
 		fmt.Printf("Output: %s\n", []byte(fmt.Sprintf("%d", waitStatus.ExitStatus())))
 	}
 
-	file := os.Getenv("BACKUP_DIR") + fileName
+	file := os.Getenv("BACKUP_DIR") + "daily/" + fileName
 	_, err = os.Stat(file)
 
 	// See if the file exists.
 	if os.IsNotExist(err) {
 		raven.CaptureErrorAndWait(err, nil)
-		dumpError()
+		sendToHorn("[PostgreSQL 📦] Возникли проблемы с бэкапом базы! ❌\nПодробнее можно узнать в Sentry! 🐞")
 		log.Fatal(err)
 	}
 
-	dumpSuccess()
+	sendToHorn("[PostgreSQL 📦][DAILY ROTATOR] База была успешно забэкаплена! ✅")
+	weeklyRotator(fileName)
+	monthlyRotator(fileName)
 }
 
-func isOlder(t time.Time) bool {
-	rotateParsedFromEnv, err := getenvInt32("ROTATED_TIME_IN_HOURS")
+func weeklyRotator(fileName string)  {
+	weekDay := int(time.Now().Weekday())
+	if weekDay == 1 && os.Getenv("ROTATED_TIME_WEEKLY") != "" {
+		_, err := copyFile(os.Getenv("BACKUP_DIR") + "daily/" + fileName, os.Getenv("BACKUP_DIR") + "weekly/" + "weekly_" + fileName)
+		if err != nil {
+			raven.CaptureErrorAndWait(err, nil)
+			sendToHorn("[PostgreSQL 📦][WEEKLY ROTATOR] Возникли проблемы с бэкапом базы! ❌\nПодробнее можно узнать в Sentry! 🐞")
+			log.Fatal(err)
+		}
+		sendToHorn("[PostgreSQL 📦][WEEKLY ROTATOR] База была успешно забэкаплена! ✅")
+	}
+}
+
+func monthlyRotator(fileName string)  {
+	monthDay := time.Now().Day()
+	if monthDay == 1 && os.Getenv("ROTATED_TIME_MONTHLY") != "" {
+		_, err := copyFile(os.Getenv("BACKUP_DIR") + "daily/" + fileName, os.Getenv("BACKUP_DIR") + "monthly/" + "monthly_" + fileName)
+		if err != nil {
+			raven.CaptureErrorAndWait(err, nil)
+			sendToHorn("[PostgreSQL 📦][MONTHLY ROTATOR] Возникли проблемы с бэкапом базы! ❌\nПодробнее можно узнать в Sentry! 🐞")
+			log.Fatal(err)
+		}
+		sendToHorn("[PostgreSQL 📦][MONTHLY ROTATOR] База была успешно забэкаплена! ✅")
+	}
+}
+
+func isOlderDaily(t time.Time) bool {
+	rotateParsedFromEnv, err := getenvInt32("ROTATED_TIME_DAILY")
 	if err != nil {
 		raven.CaptureErrorAndWait(err, nil)
 		log.Fatal(err)
 	}
-	var rotateTimeInHours = time.Duration(rotateParsedFromEnv) * time.Hour
+	var rotateTimeInHours = time.Duration(rotateParsedFromEnv * 24 + 24) * time.Hour
 	return time.Now().Sub(t) > rotateTimeInHours
 }
 
-func findOlderFiles(dir string) (files []os.FileInfo, err error) {
+func findOlderFilesDaily(dir string) (files []os.FileInfo, err error) {
 	tmpfiles, err := ioutil.ReadDir(dir)
 	if err != nil {
 		raven.CaptureErrorAndWait(err, nil)
@@ -253,7 +198,7 @@ func findOlderFiles(dir string) (files []os.FileInfo, err error) {
 
 	for _, file := range tmpfiles {
 		if file.Mode().IsRegular() {
-			if isOlder(file.ModTime()) {
+			if isOlderDaily(file.ModTime()) {
 				files = append(files, file)
 			}
 		}
@@ -261,8 +206,63 @@ func findOlderFiles(dir string) (files []os.FileInfo, err error) {
 	return
 }
 
-func gzTypeFileChecking(filename string) string {
-	buf, _ := ioutil.ReadFile(os.Getenv("BACKUP_DIR") + filename)
+func isOlderWeekly(t time.Time) bool {
+	rotateParsedFromEnv, err := getenvInt32("ROTATED_TIME_WEEKLY")
+	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		log.Fatal(err)
+	}
+	var rotateTimeInHours = time.Duration(rotateParsedFromEnv * 168 + 24) * time.Hour
+	return time.Now().Sub(t) > rotateTimeInHours
+}
+
+func findOlderFilesWeekly(dir string) (files []os.FileInfo, err error) {
+	tmpfiles, err := ioutil.ReadDir(dir)
+	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		log.Fatal(err)
+	}
+
+	for _, file := range tmpfiles {
+		if file.Mode().IsRegular() {
+			if isOlderWeekly(file.ModTime()) {
+				files = append(files, file)
+			}
+		}
+	}
+	return
+}
+
+func findOlderFilesMonthly(dir string) (files []os.FileInfo, err error) {
+	tmpfiles, err := ioutil.ReadDir(dir)
+	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		log.Fatal(err)
+	}
+
+	for _, file := range tmpfiles {
+		if file.Mode().IsRegular() {
+			if isOlderMonthly(file.ModTime()) {
+				files = append(files, file)
+			}
+		}
+	}
+	return
+}
+
+func isOlderMonthly(t time.Time) bool {
+	rotateParsedFromEnv, err := getenvInt("ROTATED_TIME_MONTHLY")
+	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		log.Fatal(err)
+	}
+	currentTime := time.Now()
+	var rotateTimeInHours = currentTime.AddDate(0, rotateParsedFromEnv, 0).Sub(currentTime)
+	return time.Now().Sub(t) > rotateTimeInHours
+}
+
+func gzTypeFileChecking(filePath string) string {
+	buf, _ := ioutil.ReadFile(filePath)
 
 	kind, _ := filetype.Match(buf)
 	if kind == filetype.Unknown {
@@ -273,63 +273,114 @@ func gzTypeFileChecking(filename string) string {
 	return kind.Extension
 }
 
-func deleteFile(fileName string) {
-	var err = os.Remove(os.Getenv("BACKUP_DIR") + fileName)
+func deleteFile(filePath string) {
+	var err = os.Remove(filePath)
 	if err != nil {
 		raven.CaptureErrorAndWait(err, nil)
 		log.Fatal(err)
 	}
 }
 
-func cleaner() {
-	files, err := findOlderFiles(os.Getenv("BACKUP_DIR"))
+func cleanerDaily() {
+	files, err := findOlderFilesDaily(os.Getenv("BACKUP_DIR") + "daily")
 	if err != nil {
 		raven.CaptureErrorAndWait(err, nil)
 		log.Fatal(err)
 	}
 	for _, file := range files {
-		fileType := gzTypeFileChecking(file.Name())
+		fileType := gzTypeFileChecking(os.Getenv("BACKUP_DIR") + "daily/" + file.Name())
 		if fileType == "gz" {
-			deleteFile(file.Name())
-			cleanerSuccess(file.Name())
+			deleteFile(os.Getenv("BACKUP_DIR") + "daily/" + file.Name())
+			sendToHorn(fmt.Sprintf("[PostgreSQL 📦 - 👴🏿] Старый бэкап [%s] был успешно удален! ✅", file.Name()))
+		}
+	}
+}
+
+func cleanerWeekly() {
+	files, err := findOlderFilesWeekly(os.Getenv("BACKUP_DIR") + "weekly")
+	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		log.Fatal(err)
+	}
+	for _, file := range files {
+		fileType := gzTypeFileChecking(os.Getenv("BACKUP_DIR") + "weekly/" + file.Name())
+		if fileType == "gz" {
+			deleteFile(os.Getenv("BACKUP_DIR") + "weekly/" + file.Name())
+			sendToHorn(fmt.Sprintf("[PostgreSQL 📦 - 👴🏿] Старый бэкап [%s] был успешно удален! ✅", file.Name()))
+		}
+	}
+}
+
+func cleanerMonthly() {
+	files, err := findOlderFilesMonthly(os.Getenv("BACKUP_DIR") + "monthly")
+	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		log.Fatal(err)
+	}
+	for _, file := range files {
+		fileType := gzTypeFileChecking(os.Getenv("BACKUP_DIR") + "monthly/" + file.Name())
+		if fileType == "gz" {
+			deleteFile(os.Getenv("BACKUP_DIR") + "monthly/" + file.Name())
+			sendToHorn(fmt.Sprintf("[PostgreSQL 📦 - 👴🏿] Старый бэкап [%s] был успешно удален! ✅", file.Name()))
 		}
 	}
 }
 
 func makeBackup() {
 	postgresqlDump()
-	cleaner()
+	cleanerDaily()
+	cleanerWeekly()
+	cleanerMonthly()
 }
 
 func initFoldersForBackups() {
-	_, err := os.Stat(os.Getenv("BACKUP_DIR"))
-
+	mainDir, err := os.Stat(os.Getenv("BACKUP_DIR"))
 	if os.IsNotExist(err) {
 		errDir := os.MkdirAll(os.Getenv("BACKUP_DIR"), 0755)
 		if errDir != nil {
 			raven.CaptureErrorAndWait(err, nil)
+			log.Println(mainDir)
 			log.Fatal(err)
 		}
+	}
+
+	daily, err := os.Stat(os.Getenv("BACKUP_DIR"))
+	errDirDaily := os.MkdirAll(os.Getenv("BACKUP_DIR") + "daily", 0755)
+	if errDirDaily != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		log.Println(daily)
+		log.Fatal(err)
+	}
+
+	weekly, err := os.Stat(os.Getenv("BACKUP_DIR"))
+	errDirWeekly := os.MkdirAll(os.Getenv("BACKUP_DIR") + "weekly", 0755)
+	if errDirWeekly != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		log.Println(weekly)
+		log.Fatal(err)
+	}
+
+	monthly, err := os.Stat(os.Getenv("BACKUP_DIR"))
+	errDirMonthly := os.MkdirAll(os.Getenv("BACKUP_DIR") + "monthly", 0755)
+	if errDirMonthly != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		log.Println(monthly)
+		log.Fatal(err)
 	}
 }
 
 func tasks() {
 	initFoldersForBackups()
-
-	gocron.Every(1).Hour().From(gocron.NextTick()).Do(makeBackup)
-
-	gocron.Every(1).Day().At("2:00").Do(makeBackup)
-
-	// remove, clear and next_run
-	_, time := gocron.NextRun()
-	fmt.Println(time)
-
-	// function Start start all the pending jobs
-	<-gocron.Start()
+	makeBackup()
 }
 
 func main() {
-	err := godotenv.Load()
+	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	if err != nil {
+		log.Fatal(err)
+	}
+	environmentPath := filepath.Join(dir, ".env")
+	err = godotenv.Load(environmentPath)
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
@@ -337,9 +388,11 @@ func main() {
 	appEnv := os.Getenv("APP_ENV")
 
 	if appEnv == "production" {
-		raven.SetDSN(os.Getenv("SENTRY_DSN"))
+		err := raven.SetDSN(os.Getenv("SENTRY_DSN"))
+		if err != nil {
+			log.Println(err)
+		}
 	}
 
 	tasks()
-
 }

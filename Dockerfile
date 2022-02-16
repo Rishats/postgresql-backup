@@ -1,4 +1,4 @@
-FROM golang:1.14.6 AS build-env
+FROM golang:1.17.1 AS build-env
 ENV GO111MODULE=on
 WORKDIR /app/postgresql-backup
 COPY go.mod .
@@ -7,27 +7,24 @@ RUN go mod download
 COPY . .
 RUN go build -o postgresql-backup
 
-FROM ubuntu:16.04 AS dev-build
+FROM ubuntu:20.04 AS dev-build
 ENV TZ="Asia/Almaty"
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PGDBVERSION=12
+ENV PGPASSWORD='docker'
 
-# Add the PostgreSQL PGP key to verify their Debian packages.
-# It should be the same key as https://www.postgresql.org/media/keys/ACCC4CF8.asc
-RUN apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+RUN apt -y update
+RUN apt -y install postgresql postgresql-contrib postgresql-client vim ca-certificates && update-ca-certificates
 
-# Add PostgreSQL's repository. It contains the most recent stable release
-#  of PostgreSQL.
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt/ precise-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-
-# Install ``python-software-properties``, ``software-properties-common`` and PostgreSQL 9.3
-#  There are some warnings (in red) that show up during the build. You can hide
-#  them by prefixing each apt-get statement with DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y python-software-properties software-properties-common postgresql-9.3 postgresql-client-9.3 postgresql-contrib-9.3 nano
-
-# Note: The official Debian and Ubuntu images automatically ``apt-get clean``
-# after each ``apt-get``
-
-# Run the rest of the commands as the ``postgres`` user created by the ``postgres-9.3`` package when it was ``apt-get installed``
+# Run the rest of the commands as the ``postgres`` user created by the ``postgres`` package when it was ``apt-get installed``
 USER postgres
+
+# Adjust PostgreSQL configuration so that remote connections to the
+# database are possible.
+RUN echo "host all  all    0.0.0.0/0  md5" >> /etc/postgresql/"$PGDBVERSION"/main/pg_hba.conf
+
+# And add ``listen_addresses`` to ``/etc/postgresql/12/main/postgresql.conf``
+RUN echo "listen_addresses='*'" >> /etc/postgresql/"$PGDBVERSION"/main/postgresql.conf
 
 # Create a PostgreSQL role named ``docker`` with ``docker`` as the password and
 # then create a database `docker` owned by the ``docker`` role.
@@ -35,20 +32,9 @@ USER postgres
 #       allows the RUN command to span multiple lines.
 RUN /etc/init.d/postgresql start &&\
     psql --command "CREATE USER docker WITH SUPERUSER PASSWORD 'docker';" &&\
-    createdb -O docker docker
-
-#RUN /etc/init.d/postgresql start &&\
-#    psql -U docker --command "CREATE TABLE accounts (username VARCHAR ( 50 ) UNIQUE NOT NULL);"
-#
-#RUN /etc/init.d/postgresql start &&\
-#    psql -U docker --command "INSERT INTO accounts(username) VALUES ('rishatsultanov');"
-
-# Adjust PostgreSQL configuration so that remote connections to the
-# database are possible.
-RUN echo "host all  all    0.0.0.0/0  md5" >> /etc/postgresql/9.3/main/pg_hba.conf
-
-# And add ``listen_addresses`` to ``/etc/postgresql/9.3/main/postgresql.conf``
-RUN echo "listen_addresses='*'" >> /etc/postgresql/9.3/main/postgresql.conf
+    createdb -O docker docker &&\
+    psql -h 127.0.0.1 -U docker docker --command "CREATE TABLE accounts (username VARCHAR ( 50 ) UNIQUE NOT NULL);" &&\
+    psql -h 127.0.0.1 -U docker docker --command "INSERT INTO accounts(username) VALUES ('rishatsultanov');"
 
 # Expose the PostgreSQL port
 EXPOSE 5432
@@ -58,8 +44,8 @@ VOLUME  ["/etc/postgresql", "/var/log/postgresql", "/var/lib/postgresql"]
 
 # BACKUP script rotate.
 WORKDIR /var/lib/postgresql/scripts
-COPY --from=build-env /app/postgresql-backup .
-COPY .env.example .env
+COPY --from=build-env /app/postgresql-backup/postgresql-backup .
+COPY --from=build-env /app/postgresql-backup/.env.example .env
 USER root
 RUN chmod +x postgresql-backup
 
