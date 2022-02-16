@@ -9,7 +9,6 @@ import (
 	"github.com/ivahaev/russian-time"
 	"github.com/jasonlvhit/gocron"
 	"github.com/joho/godotenv"
-	"html/template"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -18,25 +17,6 @@ import (
 	"syscall"
 	"time"
 )
-
-func getTemplate(fileName string, funcmap template.FuncMap, data interface{}) (result string, err error) {
-	template, err := template.New(fileName).Funcs(funcmap).ParseFiles("templates/" + fileName)
-	if err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
-	}
-
-	var tpl bytes.Buffer
-	if err := template.Execute(&tpl, data); err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
-		panic(err)
-	}
-
-	result = tpl.String()
-
-	return
-}
 
 func sendToHorn(text string) {
 	m := map[string]interface{}{
@@ -81,70 +61,8 @@ func weekDay() rtime.Weekday {
 	return t.Weekday()
 }
 
-func dumpError() {
-	type Info struct {
-		Status string
-	}
-
-	templateData := Info{
-		Status: "Dump error!",
-	}
-
-	funcmap := template.FuncMap{
-		"weekDay":     weekDay,
-		"hourWithMin": hourWithMin,
-	}
-
-	text, err := getTemplate("unsuccessful_backup.gohtml", funcmap, templateData)
-	if err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
-	}
-	sendToHorn(text)
-}
-
-func dumpSuccess() {
-	type Info struct {
-		Status string
-	}
-
-	templateData := Info{
-		Status: "Dump successful!",
-	}
-
-	funcmap := template.FuncMap{
-		"weekDay":     weekDay,
-		"hourWithMin": hourWithMin,
-	}
-
-	text, err := getTemplate("successful_backup.gohtml", funcmap, templateData)
-	if err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
-	}
-	sendToHorn(text)
-}
-
 func cleanerSuccess(fileName string) {
-	type Info struct {
-		FileName string
-	}
-
-	templateData := Info{
-		FileName: fileName,
-	}
-
-	funcmap := template.FuncMap{
-		"weekDay":     weekDay,
-		"hourWithMin": hourWithMin,
-	}
-
-	text, err := getTemplate("successful_cleaner.gohtml", funcmap, templateData)
-	if err != nil {
-		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
-	}
-	sendToHorn(text)
+	sendToHorn(fmt.Sprintf("[PostgreSQL 📦 - 👴🏿] Старый бэкап [%s] был успешно удален! ✅", fileName))
 }
 
 func fileNameGenerate() string {
@@ -200,7 +118,7 @@ func postgresqlDump() {
 	_, err := cmd.StdoutPipe()
 	if err != nil {
 		raven.CaptureErrorAndWait(err, nil)
-		dumpError()
+		sendToHorn("[PostgreSQL 📦] Возникли проблемы с бэкапом базы! ❌\nПодробнее можно узнать в Sentry! 🐞")
 		log.Fatal(err)
 	}
 
@@ -208,7 +126,7 @@ func postgresqlDump() {
 	if err := cmd.Run(); err != nil {
 		if err != nil {
 			raven.CaptureErrorAndWait(err, nil)
-			dumpError()
+			sendToHorn("[PostgreSQL 📦] Возникли проблемы с бэкапом базы! ❌\nПодробнее можно узнать в Sentry! 🐞")
 			log.Fatal(err)
 		}
 		if exitError, ok := err.(*exec.ExitError); ok {
@@ -227,11 +145,11 @@ func postgresqlDump() {
 	// See if the file exists.
 	if os.IsNotExist(err) {
 		raven.CaptureErrorAndWait(err, nil)
-		dumpError()
+		sendToHorn("[PostgreSQL 📦] Возникли проблемы с бэкапом базы! ❌\nПодробнее можно узнать в Sentry! 🐞")
 		log.Fatal(err)
 	}
 
-	dumpSuccess()
+	sendToHorn("[PostgreSQL 📦] База была успешно забэкаплена! ✅")
 }
 
 func isOlder(t time.Time) bool {
@@ -291,7 +209,7 @@ func cleaner() {
 		fileType := gzTypeFileChecking(file.Name())
 		if fileType == "gz" {
 			deleteFile(file.Name())
-			cleanerSuccess(file.Name())
+			sendToHorn(fmt.Sprintf("[PostgreSQL 📦 - 👴🏿] Старый бэкап [%s] был успешно удален! ✅", file.Name()))
 		}
 	}
 }
@@ -341,5 +259,4 @@ func main() {
 	}
 
 	tasks()
-
 }
