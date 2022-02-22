@@ -10,10 +10,12 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -84,6 +86,7 @@ func generatePostgresqlDumpOptions(fileName string) string {
 func copyFile(src, dst string) (int64, error) {
 	sourceFileStat, err := os.Stat(src)
 	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
 		return 0, err
 	}
 
@@ -93,12 +96,14 @@ func copyFile(src, dst string) (int64, error) {
 
 	source, err := os.Open(src)
 	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
 		return 0, err
 	}
 	defer source.Close()
 
 	destination, err := os.Create(dst)
 	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
 		return 0, err
 	}
 	defer destination.Close()
@@ -106,15 +111,49 @@ func copyFile(src, dst string) (int64, error) {
 	return nBytes, err
 }
 
+func Round(val float64, roundOn float64, places int) (newVal float64) {
+	var round float64
+	pow := math.Pow(10, float64(places))
+	digit := pow * val
+	_, div := math.Modf(digit)
+	if div >= roundOn {
+		round = math.Ceil(digit)
+	} else {
+		round = math.Floor(digit)
+	}
+	newVal = round / pow
+	return
+}
+
+func HumanFileSize(size float64) string {
+	var (
+		suffixes [5]string
+	)
+
+	fmt.Println(size)
+	suffixes[0] = "B"
+	suffixes[1] = "KB"
+	suffixes[2] = "MB"
+	suffixes[3] = "GB"
+	suffixes[4] = "TB"
+
+	base := math.Log(size) / math.Log(1024)
+	getSize := Round(math.Pow(1024, base-math.Floor(base)), .5, 2)
+	fmt.Println(int(math.Floor(base)))
+	getSuffix := suffixes[int(math.Floor(base))]
+	return strconv.FormatFloat(getSize, 'f', -1, 64) + " " + string(getSuffix)
+}
+
 func postgresqlDump() {
 	fileName := fileNameGenerate()
+	dbPassword := os.Getenv("POSTGRESQL_PASSWORD")
 	options := generatePostgresqlDumpOptions(fileName)
 
 	// pg_dump -U postgres -h 127.0.0.1 -p 5432 docker | gzip > /var/lib/postgresql/backups/filename.sql.gz
-	cmd := exec.Command("/bin/sh",
-		"-c",
-		"pg_dump "+options)
-
+	cmd := exec.Command("/bin/sh", "-c", "pg_dump "+options)
+	additionalEnv := "PGPASSWORD=" + dbPassword
+	newEnv := append(os.Environ(), additionalEnv)
+	cmd.Env = newEnv
 	_, err := cmd.StdoutPipe()
 	if err != nil {
 		raven.CaptureErrorAndWait(err, nil)
@@ -139,7 +178,8 @@ func postgresqlDump() {
 	}
 
 	file := os.Getenv("BACKUP_DIR") + "daily/" + fileName
-	_, err = os.Stat(file)
+	dailyBackupFile, err := os.Stat(file)
+	dailyBackupFileSize := dailyBackupFile.Name() + " - " + HumanFileSize(float64(dailyBackupFile.Size()))
 
 	// See if the file exists.
 	if os.IsNotExist(err) {
@@ -148,7 +188,8 @@ func postgresqlDump() {
 		log.Fatal(err)
 	}
 
-	sendToHorn("[PostgreSQL 📦][DAILY ROTATOR] База была успешно забэкаплена! ✅")
+	fmt.Println("[PostgreSQL 📦][DAILY ROTATOR " + dailyBackupFileSize + "] База была успешно забэкаплена! ✅")
+	sendToHorn("[PostgreSQL 📦][DAILY ROTATOR " + dailyBackupFileSize + "] База была успешно забэкаплена! ✅")
 	weeklyRotator(fileName)
 	monthlyRotator(fileName)
 }
