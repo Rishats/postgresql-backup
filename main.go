@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/getsentry/raven-go"
-	"github.com/h2non/filetype"
-	"github.com/joho/godotenv"
 	"io"
 	"io/ioutil"
 	"log"
@@ -18,6 +15,10 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/getsentry/raven-go"
+	"github.com/h2non/filetype"
+	"github.com/joho/godotenv"
 )
 
 func sendToHorn(text string) {
@@ -29,17 +30,17 @@ func sendToHorn(text string) {
 	req, err := http.NewRequest("POST", os.Getenv("INTEGRAM_WEBHOOK_URI"), contentReader)
 	if err != nil {
 		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
+		log.Println(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
 		raven.CaptureErrorAndWait(err, nil)
-		log.Panic(err)
-	}
+		log.Println(err)
 
-	fmt.Println(resp)
+		fmt.Println(resp)
+	}
 }
 
 func fileNameGenerate() string {
