@@ -153,10 +153,10 @@ func postgresqlDump() {
 	monthlyRotator(fileName)
 }
 
-func weeklyRotator(fileName string)  {
+func weeklyRotator(fileName string) {
 	weekDay := int(time.Now().Weekday())
 	if weekDay == 1 && os.Getenv("ROTATED_TIME_WEEKLY") != "" {
-		_, err := copyFile(os.Getenv("BACKUP_DIR") + "daily/" + fileName, os.Getenv("BACKUP_DIR") + "weekly/" + "weekly_" + fileName)
+		_, err := copyFile(os.Getenv("BACKUP_DIR")+"daily/"+fileName, os.Getenv("BACKUP_DIR")+"weekly/"+"weekly_"+fileName)
 		if err != nil {
 			raven.CaptureErrorAndWait(err, nil)
 			sendToHorn("[PostgreSQL 📦][WEEKLY ROTATOR] Возникли проблемы с бэкапом базы! ❌\nПодробнее можно узнать в Sentry! 🐞")
@@ -166,10 +166,10 @@ func weeklyRotator(fileName string)  {
 	}
 }
 
-func monthlyRotator(fileName string)  {
+func monthlyRotator(fileName string) {
 	monthDay := time.Now().Day()
 	if monthDay == 1 && os.Getenv("ROTATED_TIME_MONTHLY") != "" {
-		_, err := copyFile(os.Getenv("BACKUP_DIR") + "daily/" + fileName, os.Getenv("BACKUP_DIR") + "monthly/" + "monthly_" + fileName)
+		_, err := copyFile(os.Getenv("BACKUP_DIR")+"daily/"+fileName, os.Getenv("BACKUP_DIR")+"monthly/"+"monthly_"+fileName)
 		if err != nil {
 			raven.CaptureErrorAndWait(err, nil)
 			sendToHorn("[PostgreSQL 📦][MONTHLY ROTATOR] Возникли проблемы с бэкапом базы! ❌\nПодробнее можно узнать в Sentry! 🐞")
@@ -185,7 +185,7 @@ func isOlderDaily(t time.Time) bool {
 		raven.CaptureErrorAndWait(err, nil)
 		log.Fatal(err)
 	}
-	var rotateTimeInHours = time.Duration(rotateParsedFromEnv * 24 + 24) * time.Hour
+	var rotateTimeInHours = time.Duration(rotateParsedFromEnv*24+24) * time.Hour
 	return time.Now().Sub(t) > rotateTimeInHours
 }
 
@@ -212,7 +212,7 @@ func isOlderWeekly(t time.Time) bool {
 		raven.CaptureErrorAndWait(err, nil)
 		log.Fatal(err)
 	}
-	var rotateTimeInHours = time.Duration(rotateParsedFromEnv * 168 + 24) * time.Hour
+	var rotateTimeInHours = time.Duration(rotateParsedFromEnv*168+24) * time.Hour
 	return time.Now().Sub(t) > rotateTimeInHours
 }
 
@@ -345,7 +345,7 @@ func initFoldersForBackups() {
 	}
 
 	daily, err := os.Stat(os.Getenv("BACKUP_DIR"))
-	errDirDaily := os.MkdirAll(os.Getenv("BACKUP_DIR") + "daily", 0755)
+	errDirDaily := os.MkdirAll(os.Getenv("BACKUP_DIR")+"daily", 0755)
 	if errDirDaily != nil {
 		raven.CaptureErrorAndWait(err, nil)
 		log.Println(daily)
@@ -353,7 +353,7 @@ func initFoldersForBackups() {
 	}
 
 	weekly, err := os.Stat(os.Getenv("BACKUP_DIR"))
-	errDirWeekly := os.MkdirAll(os.Getenv("BACKUP_DIR") + "weekly", 0755)
+	errDirWeekly := os.MkdirAll(os.Getenv("BACKUP_DIR")+"weekly", 0755)
 	if errDirWeekly != nil {
 		raven.CaptureErrorAndWait(err, nil)
 		log.Println(weekly)
@@ -361,7 +361,7 @@ func initFoldersForBackups() {
 	}
 
 	monthly, err := os.Stat(os.Getenv("BACKUP_DIR"))
-	errDirMonthly := os.MkdirAll(os.Getenv("BACKUP_DIR") + "monthly", 0755)
+	errDirMonthly := os.MkdirAll(os.Getenv("BACKUP_DIR")+"monthly", 0755)
 	if errDirMonthly != nil {
 		raven.CaptureErrorAndWait(err, nil)
 		log.Println(monthly)
@@ -380,9 +380,11 @@ func main() {
 		log.Fatal(err)
 	}
 	environmentPath := filepath.Join(dir, ".env")
+	linuxEnvironmentPath := filepath.Join("/usr/local/etc/postgresql_backup", ".env")
 	err = godotenv.Load(environmentPath)
-	if err != nil {
-		log.Fatal("Error loading .env file")
+	errLinuxConfigLoading := godotenv.Load(linuxEnvironmentPath)
+	if err != nil && errLinuxConfigLoading != nil {
+		log.Fatal("Error loading .env file \n Check .env in current directory or in /usr/local/etc/postgresql_backup")
 	}
 
 	appEnv := os.Getenv("APP_ENV")

@@ -45,9 +45,9 @@ VOLUME  ["/etc/postgresql", "/var/log/postgresql", "/var/lib/postgresql"]
 # BACKUP script rotate.
 WORKDIR /var/lib/postgresql/scripts
 COPY --from=build-env /app/postgresql-backup/postgresql-backup .
-COPY --from=build-env /app/postgresql-backup/.env.example .env
 USER root
 RUN chmod +x postgresql-backup
+COPY --from=build-env /app/postgresql-backup/.env.example /usr/local/etc/postgresql_backup/.env
 
 # Add files
 ADD docker/entrypoint.sh /entrypoint.sh
