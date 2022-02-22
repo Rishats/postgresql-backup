@@ -1,0 +1,55 @@
+name: Build
+on:
+  push:
+    branches:
+      - master
+      - develop
+  pull_request:
+
+jobs:
+  build_for_linux_amd64:
+    name: Build for Linux amd64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.17.1
+
+      - name: Check out code
+        uses: actions/checkout@v1
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Build
+        run: go build -o postgresql-backup
+
+      - name: Upload dir and bin as artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: postgresql_backup_linux_amd64
+          path: postgresql-backup
+  build_for_linux_arm64:
+    name: Build for Linux arm64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.17.1
+
+      - name: Check out code
+        uses: actions/checkout@v1
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Build
+        run: GOARCH=arm64 go build -o postgresql-backup
+
+      - name: Upload dir and bin as artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: postgresql_backup_linux_arm64
+          path: postgresql-backup
