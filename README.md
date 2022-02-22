@@ -4,15 +4,15 @@ Simple system which use pg_dump for dump postgresql db and send info in to Teleg
 
 ### Installing for develop purpose
 1) Clone project
-    ```
+    ```bash
     git clone https://github.com/Rishats/postgresql-backup.git
     ```
 2) Change folder
-    ```
+    ```bash
     cd postgresql-backup
     ```
 3) Create .env file from .env.example
-    ```
+    ```bash
      cp .env.example .env
     ```
 
@@ -36,17 +36,17 @@ Simple system which use pg_dump for dump postgresql db and send info in to Teleg
 #### Via go native:
 
 Download dependency
-```
+```bash
 go mod download
 ```
 
 Build for linux
-```
+```bash
 env GOOS=linux GOARCH=amd64 go build main.go
 ```
 
 #### Via docker:
-```
+```bash
  docker build --target=build-env -t postgresql-backup .
  docker run -d --name "postgresql-backup" postgresql-backup
 ```
@@ -54,20 +54,23 @@ env GOOS=linux GOARCH=amd64 go build main.go
 
 ### Usage
 
-#### Simple crontab
+#### Via Ansible playbooks
+https://github.com/Rishats/ansible-postgresql-backup
+
+#### Via simple crontab
 1) Create scripts folder and download latest release with custom .env
-   ```
+   ```bash
    mkdir scripts
    cp .env.example .env
    vim .env
    ```
 2) Added example crontab entry
    
-    ```
+    ```bash
     crontab -u postgres -e
     ```
 
-    ```
+    ```bash
     0 2 * * * /var/lib/postgresql/scripts/postgresql-backup > /dev/null 2>&1
     ```
 
